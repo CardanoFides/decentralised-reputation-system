@@ -67,7 +67,9 @@ mkValidator d _ ctx =
 
     correctMintedToken :: Bool
     correctMintedToken = case flattenValue (txInfoMint info) of
-        [(cs, _, _)] -> cs == rdCurrencySymbol d
+        [(cs, _, amount)] ->
+            cs == rdCurrencySymbol d &&
+            amount == 1
         _ -> False
 
     ownOutput :: TxOut
