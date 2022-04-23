@@ -28,7 +28,7 @@ import           Ledger.Ada                 as Ada
 import           Ledger.Constraints         as Constraints
 import qualified Ledger.Typed.Scripts       as Scripts
 import           Ledger.Value               as Value
-import           Prelude                    (IO, Semigroup (..), String)
+import           Prelude                    (IO, Semigroup (..), Show (..), String)
 import           Text.Printf                (printf)
 import           Wallet.Emulator.Wallet
 
@@ -48,10 +48,16 @@ curSymbol = scriptCurrencySymbol policy
 lovelaces :: Value -> Integer
 lovelaces = Ada.getLovelace . Ada.fromValue
 
+data RatingDatum = RatingDatum
+    { rdCurrencySymbol :: !CurrencySymbol
+    } deriving Show
+
+PlutusTx.unstableMakeIsData ''RatingDatum
+
 {-# INLINABLE mkValidator #-}
 -- Check if a native token is minted and send to the script address
-mkValidator :: () -> () -> ScriptContext -> Bool
-mkValidator _ _ ctx = 
+mkValidator :: RatingDatum -> () -> ScriptContext -> Bool
+mkValidator d _ ctx =
     traceIfFalse "Output does not have correct ADA value" correctAdaValue &&
     traceIfFalse "Output does not have correct Token value" correctMintedToken
   where
@@ -61,11 +67,8 @@ mkValidator _ _ ctx =
 
     correctMintedToken :: Bool
     correctMintedToken = case flattenValue (txInfoMint info) of
-        [(cs, _, _)] -> if cs == ratingTokenSymbol then True else False
+        [(cs, _, _)] -> cs == rdCurrencySymbol d
         _ -> False
-
-    ratingTokenSymbol :: CurrencySymbol
-    ratingTokenSymbol = scriptCurrencySymbol policy
 
     ownOutput :: TxOut
     ownOutput = case getContinuingOutputs ctx of
@@ -75,17 +78,17 @@ mkValidator _ _ ctx =
     info :: TxInfo
     info = scriptContextTxInfo ctx
 
-data Typed
-instance Scripts.ValidatorTypes Typed where
-    type instance DatumType Typed = ()
-    type instance RedeemerType Typed = ()
+data Rating
+instance Scripts.ValidatorTypes Rating where
+    type instance DatumType Rating = RatingDatum
+    type instance RedeemerType Rating = ()
 
-typedValidator :: Scripts.TypedValidator Typed
-typedValidator = Scripts.mkTypedValidator @Typed
+typedValidator :: Scripts.TypedValidator Rating
+typedValidator = Scripts.mkTypedValidator @Rating
     $$(PlutusTx.compile [|| mkValidator ||])
     $$(PlutusTx.compile [|| wrap ||])
   where
-    wrap = Scripts.wrapValidator @() @()
+    wrap = Scripts.wrapValidator @RatingDatum @()
 
 validator :: Validator
 validator = Scripts.validatorScript typedValidator
@@ -100,11 +103,12 @@ minLovelace :: Integer
 minLovelace = 2_000_000
 
 data StartParams = StartParams
-    { spPlaceHolder :: !Integer
+    { spRatingCurrencySymbol :: !CurrencySymbol
     } deriving (Generic, ToJSON, FromJSON)
 
 data PayParams = PayParams
-    { ppTokenName :: !TokenName
+    { ppRatingCurrencySymbol :: !CurrencySymbol
+    , ppTokenName :: !TokenName
     , ppAmount :: !Integer
     , ppAddress :: !Address
     } deriving (Generic, ToJSON, FromJSON)
@@ -114,8 +118,11 @@ type ReputationSchema =
     .\/ Endpoint "pay" PayParams
 
 start :: StartParams -> Contract w ReputationSchema Text ()
-start _ = do
-    let d = ()
+start sp = do
+    let d :: RatingDatum
+        d = RatingDatum
+            { rdCurrencySymbol = spRatingCurrencySymbol sp
+            }
         v = Ada.lovelaceValueOf 10_000_000
         tx = Constraints.mustPayToTheScript d v
     ledgerTx <- submitTxConstraints typedValidator tx    
@@ -133,7 +140,9 @@ pay pp = do
     let mintVal = Value.singleton curSymbol (ppTokenName pp) (ppAmount pp)
         inputVal = _ciTxOutValue ro
         walletVal = mintVal <> Ada.lovelaceValueOf minLovelace
-        d = ()
+        d = RatingDatum
+            { rdCurrencySymbol = ppRatingCurrencySymbol pp
+            }
         r = Redeemer $ PlutusTx.toBuiltinData ()
         lookups = Constraints.mintingPolicy policy <>
                   Constraints.unspentOutputs (Map.singleton rORef ro) <>
@@ -146,7 +155,7 @@ pay pp = do
              Constraints.mustSpendScriptOutput rORef r <>
              Constraints.mustSpendPubKeyOutput wORef 
     Contract.logInfo @String $ printf "Ready to submit Tx"
-    ledgerTx <- submitTxConstraintsWith @Typed lookups tx
+    ledgerTx <- submitTxConstraintsWith @Rating lookups tx
     Contract.logInfo @String $ printf "Tx has been submited"
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
     Contract.logInfo @String $ printf "Paid to reputation validator script"
@@ -184,12 +193,13 @@ test = runEmulatorTraceIO $ do
     h1 <- activateContractWallet w1 endpoints
     h2 <- activateContractWallet w2 endpoints
     callEndpoint @"start" h1 $ StartParams
-        { spPlaceHolder = 1
+        { spRatingCurrencySymbol = curSymbol
         }
     void $ Emulator.waitNSlots 1
 
     callEndpoint @"pay" h2 $ PayParams
-        { ppTokenName = "TRUST"
+        { ppRatingCurrencySymbol = curSymbol
+        , ppTokenName = "TRUST"
         , ppAmount = 1
         , ppAddress = mockWalletAddress w2
         }
