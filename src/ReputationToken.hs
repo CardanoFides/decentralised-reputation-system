@@ -50,7 +50,7 @@ lovelaces = Ada.getLovelace . Ada.fromValue
 
 data RatingDatum = RatingDatum
     { rdCurrencySymbol :: !CurrencySymbol
-    } deriving Show
+    }
 
 PlutusTx.unstableMakeIsData ''RatingDatum
 
