@@ -58,12 +58,12 @@ PlutusTx.unstableMakeIsData ''RatingDatum
 -- Check if a native token is minted and send to the script address
 mkValidator :: RatingDatum -> () -> ScriptContext -> Bool
 mkValidator d _ ctx =
-    traceIfFalse "Output does not have correct ADA value" correctAdaValue &&
+    traceIfFalse "Output ADA value does not match input" lockedAdaUnchanged &&
     traceIfFalse "Output does not have correct Token value" correctMintedToken
   where
-    correctAdaValue :: Bool
-    correctAdaValue = 
-        lovelaces (txOutValue ownOutput) == 10_000_000
+    lockedAdaUnchanged :: Bool
+    lockedAdaUnchanged =
+        txOutValue ownOutput == txOutValue ownInput
 
     correctMintedToken :: Bool
     correctMintedToken = case flattenValue (txInfoMint info) of
@@ -71,6 +71,11 @@ mkValidator d _ ctx =
             cs == rdCurrencySymbol d &&
             amount == 1
         _ -> False
+
+    ownInput :: TxOut
+    ownInput = case findOwnInput ctx of
+        Nothing -> traceError "Rating input missing"
+        Just i -> txInInfoResolved i
 
     ownOutput :: TxOut
     ownOutput = case getContinuingOutputs ctx of
@@ -125,7 +130,7 @@ start sp = do
         d = RatingDatum
             { rdCurrencySymbol = spRatingCurrencySymbol sp
             }
-        v = Ada.lovelaceValueOf 10_000_000
+        v = Ada.lovelaceValueOf 20_000_000
         tx = Constraints.mustPayToTheScript d v
     ledgerTx <- submitTxConstraints typedValidator tx    
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
