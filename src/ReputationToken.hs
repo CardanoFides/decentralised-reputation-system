@@ -5,6 +5,7 @@
 {-# LANGUAGE NoImplicitPrelude   #-}
 {-# LANGUAGE NumericUnderscores  #-}
 {-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
 {-# LANGUAGE TypeApplications    #-}
@@ -54,16 +55,27 @@ data RatingDatum = RatingDatum
 
 PlutusTx.unstableMakeIsData ''RatingDatum
 
+data Pay = Pay
+    { pPayer :: !PaymentPubKeyHash
+    , pPay :: !Integer
+    }
+
+PlutusTx.unstableMakeIsData ''Pay
+
+data RatingAction = MkPayment Pay
+
+PlutusTx.unstableMakeIsData ''RatingAction
+
 {-# INLINABLE mkValidator #-}
 -- Check if a native token is minted and send to the script address
-mkValidator :: RatingDatum -> () -> ScriptContext -> Bool
-mkValidator d _ ctx =
-    traceIfFalse "Output ADA value does not match input" lockedAdaUnchanged &&
+mkValidator :: RatingDatum -> RatingAction -> ScriptContext -> Bool
+mkValidator d (MkPayment Pay {..}) ctx =
+    traceIfFalse "Output ADA value is incorrect" correctLockedAda &&
     traceIfFalse "Output does not have correct Token value" correctMintedToken
   where
-    lockedAdaUnchanged :: Bool
-    lockedAdaUnchanged =
-        txOutValue ownOutput == txOutValue ownInput
+    correctLockedAda :: Bool
+    correctLockedAda =
+        lovelaces (txOutValue ownOutput) == lovelaces (txOutValue ownInput) + pPay
 
     correctMintedToken :: Bool
     correctMintedToken = case flattenValue (txInfoMint info) of
@@ -88,14 +100,14 @@ mkValidator d _ ctx =
 data Rating
 instance Scripts.ValidatorTypes Rating where
     type instance DatumType Rating = RatingDatum
-    type instance RedeemerType Rating = ()
+    type instance RedeemerType Rating = RatingAction
 
 typedValidator :: Scripts.TypedValidator Rating
 typedValidator = Scripts.mkTypedValidator @Rating
     $$(PlutusTx.compile [|| mkValidator ||])
     $$(PlutusTx.compile [|| wrap ||])
   where
-    wrap = Scripts.wrapValidator @RatingDatum @()
+    wrap = Scripts.wrapValidator @RatingDatum @RatingAction
 
 validator :: Validator
 validator = Scripts.validatorScript typedValidator
@@ -116,7 +128,8 @@ data StartParams = StartParams
 data PayParams = PayParams
     { ppRatingCurrencySymbol :: !CurrencySymbol
     , ppTokenName :: !TokenName
-    , ppAmount :: !Integer
+    , ppTokenAmount :: !Integer
+    , ppPayment :: !Integer
     , ppAddress :: !Address
     } deriving (Generic, ToJSON, FromJSON)
 
@@ -144,23 +157,29 @@ pay pp = do
     Contract.logInfo @String $ printf "found wallet utxo"
     pkh <- Contract.ownPaymentPubKeyHash
     Contract.logInfo @String $ printf "PubKeyHash is found"
-    let mintVal = Value.singleton curSymbol (ppTokenName pp) (ppAmount pp)
-        inputVal = _ciTxOutValue ro
-        walletVal = mintVal <> Ada.lovelaceValueOf minLovelace
+    let mintVal = Value.singleton curSymbol (ppTokenName pp) (ppTokenAmount pp)
+        scriptInputVal = _ciTxOutValue ro
+        walletReceivingVal = mintVal <> Ada.lovelaceValueOf minLovelace
+        walletPayVal = lovelaceValueOf $ ppPayment pp
+        scriptOutputVal = scriptInputVal <> walletPayVal
+        p = Pay
+            { pPayer = pkh
+            , pPay = lovelaces walletPayVal
+            }
         d = RatingDatum
             { rdCurrencySymbol = ppRatingCurrencySymbol pp
             }
-        r = Redeemer $ PlutusTx.toBuiltinData ()
+        r = Redeemer $ PlutusTx.toBuiltinData $ MkPayment p
         lookups = Constraints.mintingPolicy policy <>
                   Constraints.unspentOutputs (Map.singleton rORef ro) <>
                   Constraints.unspentOutputs (Map.singleton wORef wo) <>
                   Constraints.otherScript validator <>
                   Constraints.typedValidatorLookups typedValidator
         tx = Constraints.mustMintValue mintVal <>
-             Constraints.mustPayToTheScript d inputVal <>
-             Constraints.mustPayToPubKey pkh walletVal <>
+             Constraints.mustPayToTheScript d scriptOutputVal <>
+             Constraints.mustPayToPubKey pkh walletReceivingVal <>
              Constraints.mustSpendScriptOutput rORef r <>
-             Constraints.mustSpendPubKeyOutput wORef 
+             Constraints.mustSpendPubKeyOutput wORef
     Contract.logInfo @String $ printf "Ready to submit Tx"
     ledgerTx <- submitTxConstraintsWith @Rating lookups tx
     Contract.logInfo @String $ printf "Tx has been submited"
@@ -207,7 +226,8 @@ test = runEmulatorTraceIO $ do
     callEndpoint @"pay" h2 $ PayParams
         { ppRatingCurrencySymbol = curSymbol
         , ppTokenName = "TRUST"
-        , ppAmount = 1
+        , ppTokenAmount = 1
+        , ppPayment = 50_000_000
         , ppAddress = mockWalletAddress w2
         }
     void $ Emulator.waitNSlots 1
