@@ -131,7 +131,7 @@ data StartParams = StartParams
     } deriving (Generic, ToJSON, FromJSON)
 
 data PayParams = PayParams
-    { ppRatingCurrencySymbol :: !CurrencySymbol
+    { ppRatingTokenSymbol :: !CurrencySymbol
     , ppTokenName :: !TokenName
     , ppTokenAmount :: !Integer
     , ppPayment :: !Integer
@@ -172,7 +172,7 @@ pay pp = do
             , pPay = lovelaces walletPayVal
             }
         d = RatingDatum
-            { rdRatingTokenSymbol = ppRatingCurrencySymbol pp
+            { rdRatingTokenSymbol = ppRatingTokenSymbol pp
             }
         r = Redeemer $ PlutusTx.toBuiltinData $ MkPayment p
         lookups = Constraints.mintingPolicy policy <>
@@ -229,7 +229,7 @@ test = runEmulatorTraceIO $ do
     void $ Emulator.waitNSlots 1
 
     callEndpoint @"pay" h2 $ PayParams
-        { ppRatingCurrencySymbol = curSymbol
+        { ppRatingTokenSymbol = curSymbol
         , ppTokenName = "TRUST"
         , ppTokenAmount = 1
         , ppPayment = 50_000_000
