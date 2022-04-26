@@ -50,7 +50,8 @@ lovelaces :: Value -> Integer
 lovelaces = Ada.getLovelace . Ada.fromValue
 
 data RatingDatum = RatingDatum
-    { rdCurrencySymbol :: !CurrencySymbol
+    { rdRatingTokenSymbol :: !CurrencySymbol
+--    , rdReputationOwner :: !PaymentPubKeyHash
     }
 
 PlutusTx.unstableMakeIsData ''RatingDatum
@@ -71,7 +72,8 @@ PlutusTx.unstableMakeIsData ''RatingAction
 mkValidator :: RatingDatum -> RatingAction -> ScriptContext -> Bool
 mkValidator d (MkPayment Pay {..}) ctx =
     traceIfFalse "Output ADA value is incorrect" correctLockedAda &&
-    traceIfFalse "Output does not have correct Token value" correctMintedToken
+    traceIfFalse "Output does not have correct Token value" correctMintedToken &&
+    traceIfFalse "Output datum hash is incorrect" correctDatumHash
   where
     correctLockedAda :: Bool
     correctLockedAda =
@@ -80,9 +82,12 @@ mkValidator d (MkPayment Pay {..}) ctx =
     correctMintedToken :: Bool
     correctMintedToken = case flattenValue (txInfoMint info) of
         [(cs, _, amount)] ->
-            cs == rdCurrencySymbol d &&
+            cs == rdRatingTokenSymbol d &&
             amount == 1
         _ -> False
+
+    correctDatumHash :: Bool
+    correctDatumHash = txOutDatumHash ownOutput == txOutDatumHash ownInput
 
     ownInput :: TxOut
     ownInput = case findOwnInput ctx of
@@ -122,7 +127,7 @@ minLovelace :: Integer
 minLovelace = 2_000_000
 
 data StartParams = StartParams
-    { spRatingCurrencySymbol :: !CurrencySymbol
+    { spRatingTokenSymbol :: !CurrencySymbol
     } deriving (Generic, ToJSON, FromJSON)
 
 data PayParams = PayParams
@@ -141,7 +146,7 @@ start :: StartParams -> Contract w ReputationSchema Text ()
 start sp = do
     let d :: RatingDatum
         d = RatingDatum
-            { rdCurrencySymbol = spRatingCurrencySymbol sp
+            { rdRatingTokenSymbol = spRatingTokenSymbol sp
             }
         v = Ada.lovelaceValueOf 20_000_000
         tx = Constraints.mustPayToTheScript d v
@@ -167,7 +172,7 @@ pay pp = do
             , pPay = lovelaces walletPayVal
             }
         d = RatingDatum
-            { rdCurrencySymbol = ppRatingCurrencySymbol pp
+            { rdRatingTokenSymbol = ppRatingCurrencySymbol pp
             }
         r = Redeemer $ PlutusTx.toBuiltinData $ MkPayment p
         lookups = Constraints.mintingPolicy policy <>
@@ -219,7 +224,7 @@ test = runEmulatorTraceIO $ do
     h1 <- activateContractWallet w1 endpoints
     h2 <- activateContractWallet w2 endpoints
     callEndpoint @"start" h1 $ StartParams
-        { spRatingCurrencySymbol = curSymbol
+        { spRatingTokenSymbol = curSymbol
         }
     void $ Emulator.waitNSlots 1
 
