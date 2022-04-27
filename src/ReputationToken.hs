@@ -29,7 +29,7 @@ import           Ledger.Ada                 as Ada
 import           Ledger.Constraints         as Constraints
 import qualified Ledger.Typed.Scripts       as Scripts
 import           Ledger.Value               as Value
-import           Prelude                    (IO, Semigroup (..), Show (..), String)
+import           Prelude                    (IO, Semigroup (..), String)
 import           Text.Printf                (printf)
 import           Wallet.Emulator.Wallet
 
@@ -51,7 +51,7 @@ lovelaces = Ada.getLovelace . Ada.fromValue
 
 data RatingDatum = RatingDatum
     { rdRatingTokenSymbol :: !CurrencySymbol
---    , rdReputationOwner :: !PaymentPubKeyHash
+    , rdOwner :: !PaymentPubKeyHash
     }
 
 PlutusTx.unstableMakeIsData ''RatingDatum
@@ -70,19 +70,23 @@ PlutusTx.unstableMakeIsData ''RatingAction
 {-# INLINABLE mkValidator #-}
 -- Check if a native token is minted and send to the script address
 mkValidator :: RatingDatum -> RatingAction -> ScriptContext -> Bool
-mkValidator d (MkPayment Pay {..}) ctx =
+mkValidator rd (MkPayment Pay {..}) ctx =
     traceIfFalse "Output ADA value is incorrect" correctLockedAda &&
+    traceIfFalse "Owner does not receive correct amount of ADA" correctAdaToOwner &&
     traceIfFalse "Output does not have correct Token value" correctMintedToken &&
     traceIfFalse "Output datum hash is incorrect" correctDatumHash
   where
     correctLockedAda :: Bool
     correctLockedAda =
-        lovelaces (txOutValue ownOutput) == lovelaces (txOutValue ownInput) + pPay
+        txOutValue ownOutput == txOutValue ownInput
+
+    correctAdaToOwner :: Bool
+    correctAdaToOwner = lovelaces (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) == pPay
 
     correctMintedToken :: Bool
     correctMintedToken = case flattenValue (txInfoMint info) of
         [(cs, _, amount)] ->
-            cs == rdRatingTokenSymbol d &&
+            cs == rdRatingTokenSymbol rd &&
             amount == 1
         _ -> False
 
@@ -132,6 +136,7 @@ data StartParams = StartParams
 
 data PayParams = PayParams
     { ppRatingTokenSymbol :: !CurrencySymbol
+--    , ppReputationOwner :: !PaymentPubKeyHash
     , ppTokenName :: !TokenName
     , ppTokenAmount :: !Integer
     , ppPayment :: !Integer
@@ -144,9 +149,11 @@ type ReputationSchema =
 
 start :: StartParams -> Contract w ReputationSchema Text ()
 start sp = do
+    pkh <- Contract.ownPaymentPubKeyHash
     let d :: RatingDatum
         d = RatingDatum
             { rdRatingTokenSymbol = spRatingTokenSymbol sp
+            , rdOwner = pkh
             }
         v = Ada.lovelaceValueOf 20_000_000
         tx = Constraints.mustPayToTheScript d v
@@ -156,7 +163,7 @@ start sp = do
 
 pay :: PayParams -> Contract w ReputationSchema Text ()
 pay pp = do
-    (rORef, ro) <- findReputationOutput
+    (rORef, ro, rDat) <- findReputationOutput
     Contract.logInfo @String $ printf "found reputation utxo"
     (wORef, wo) <- findWalletOutput $ ppAddress pp
     Contract.logInfo @String $ printf "found wallet utxo"
@@ -166,13 +173,14 @@ pay pp = do
         scriptInputVal = _ciTxOutValue ro
         walletReceivingVal = mintVal <> Ada.lovelaceValueOf minLovelace
         walletPayVal = lovelaceValueOf $ ppPayment pp
-        scriptOutputVal = scriptInputVal <> walletPayVal
+        rOwnerPkh = rdOwner rDat
         p = Pay
             { pPayer = pkh
             , pPay = lovelaces walletPayVal
             }
         d = RatingDatum
             { rdRatingTokenSymbol = ppRatingTokenSymbol pp
+            , rdOwner = rOwnerPkh
             }
         r = Redeemer $ PlutusTx.toBuiltinData $ MkPayment p
         lookups = Constraints.mintingPolicy policy <>
@@ -181,7 +189,8 @@ pay pp = do
                   Constraints.otherScript validator <>
                   Constraints.typedValidatorLookups typedValidator
         tx = Constraints.mustMintValue mintVal <>
-             Constraints.mustPayToTheScript d scriptOutputVal <>
+             Constraints.mustPayToTheScript d scriptInputVal <>
+             Constraints.mustPayToPubKey rOwnerPkh walletPayVal <>
              Constraints.mustPayToPubKey pkh walletReceivingVal <>
              Constraints.mustSpendScriptOutput rORef r <>
              Constraints.mustSpendPubKeyOutput wORef
@@ -191,14 +200,19 @@ pay pp = do
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
     Contract.logInfo @String $ printf "Paid to reputation validator script"
 
-findReputationOutput :: Contract w s Text (TxOutRef, ChainIndexTxOut)
+findReputationOutput :: Contract w s Text (TxOutRef, ChainIndexTxOut, RatingDatum)
 findReputationOutput = do
     utxos <- utxosAt scrAddress
     let xs = [ (oref, o)
              | (oref, o) <- Map.toList utxos
              ]
     case xs of
-        [(oref, o)] -> return (oref, o)
+        [(oref, o)] -> case _ciTxOutDatum o of
+            Left _ -> Contract.throwError "datum missing"
+            Right (Datum e) -> case PlutusTx.fromBuiltinData e of
+                Nothing -> Contract.throwError "datum has wrong type"
+                Just d -> return (oref, o, d)
+
         _ -> Contract.throwError "Reputation utxo is wrong"
 
 findWalletOutput :: Address -> Contract w s Text (TxOutRef, ChainIndexTxOut) 
