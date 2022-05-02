@@ -51,6 +51,7 @@ lovelaces = Ada.getLovelace . Ada.fromValue
 
 data RatingDatum = RatingDatum
     { rdRatingTokenSymbol :: !CurrencySymbol
+    , rdRatingTokenName :: !TokenName
     , rdOwner :: !PaymentPubKeyHash
     }
 
@@ -84,11 +85,10 @@ mkValidator rd (MkPayment Pay {..}) ctx =
     correctAdaToOwner = lovelaces (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) == pPay
 
     correctMintedToken :: Bool
-    correctMintedToken = case flattenValue (txInfoMint info) of
-        [(cs, _, amount)] ->
-            cs == rdRatingTokenSymbol rd &&
-            amount == 1
-        _ -> False
+    correctMintedToken = txInfoMint info == ratingToken
+
+    ratingToken :: Value
+    ratingToken = Value.singleton (rdRatingTokenSymbol rd) (rdRatingTokenName rd) 1
 
     correctDatumHash :: Bool
     correctDatumHash = txOutDatumHash ownOutput == txOutDatumHash ownInput
@@ -132,12 +132,13 @@ minLovelace = 2_000_000
 
 data StartParams = StartParams
     { spRatingTokenSymbol :: !CurrencySymbol
+    , spRatingTokenName :: !TokenName
     } deriving (Generic, ToJSON, FromJSON)
 
 data PayParams = PayParams
     { ppRatingTokenSymbol :: !CurrencySymbol
 --    , ppReputationOwner :: !PaymentPubKeyHash
-    , ppTokenName :: !TokenName
+    , ppRatingTokenName :: !TokenName
     , ppTokenAmount :: !Integer
     , ppPayment :: !Integer
     , ppAddress :: !Address
@@ -153,6 +154,7 @@ start sp = do
     let d :: RatingDatum
         d = RatingDatum
             { rdRatingTokenSymbol = spRatingTokenSymbol sp
+            , rdRatingTokenName = spRatingTokenName sp
             , rdOwner = pkh
             }
         v = Ada.lovelaceValueOf 20_000_000
@@ -169,7 +171,7 @@ pay pp = do
     Contract.logInfo @String $ printf "found wallet utxo"
     pkh <- Contract.ownPaymentPubKeyHash
     Contract.logInfo @String $ printf "PubKeyHash is found"
-    let mintVal = Value.singleton curSymbol (ppTokenName pp) (ppTokenAmount pp)
+    let mintVal = Value.singleton curSymbol (ppRatingTokenName pp) (ppTokenAmount pp)
         scriptInputVal = _ciTxOutValue ro
         walletReceivingVal = mintVal <> Ada.lovelaceValueOf minLovelace
         walletPayVal = lovelaceValueOf $ ppPayment pp
@@ -180,6 +182,7 @@ pay pp = do
             }
         d = RatingDatum
             { rdRatingTokenSymbol = ppRatingTokenSymbol pp
+            , rdRatingTokenName = ppRatingTokenName pp
             , rdOwner = rOwnerPkh
             }
         r = Redeemer $ PlutusTx.toBuiltinData $ MkPayment p
@@ -239,12 +242,13 @@ test = runEmulatorTraceIO $ do
     h2 <- activateContractWallet w2 endpoints
     callEndpoint @"start" h1 $ StartParams
         { spRatingTokenSymbol = curSymbol
+        , spRatingTokenName = "TRUST"
         }
     void $ Emulator.waitNSlots 1
 
     callEndpoint @"pay" h2 $ PayParams
         { ppRatingTokenSymbol = curSymbol
-        , ppTokenName = "TRUST"
+        , ppRatingTokenName = "TRUST"
         , ppTokenAmount = 1
         , ppPayment = 50_000_000
         , ppAddress = mockWalletAddress w2
