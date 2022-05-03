@@ -83,10 +83,14 @@ mkValidator rd (MkPayment Pay {..}) ctx =
         txOutValue ownOutput == txOutValue ownInput
 
     correctAdaToOwner :: Bool
-    correctAdaToOwner = lovelaces (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) == pPay
+    correctAdaToOwner =
+        (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) ==
+        Ada.lovelaceValueOf pPay
 
     correctValueToPayer :: Bool
-    correctValueToPayer = (valuePaidTo info $ unPaymentPubKeyHash pPayer) == valuePayerToReceive
+    correctValueToPayer =
+        (valuePaidTo info $ unPaymentPubKeyHash pPayer) ==
+        valuePayerToReceive
 
     valuePayerToReceive :: Value
     valuePayerToReceive =
@@ -94,7 +98,7 @@ mkValidator rd (MkPayment Pay {..}) ctx =
         - txOutValue ownInput  -- value locked by this script
         - (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) -- value to be paid to owner
         - txInfoFee info  -- tx fee
-        + ratingToken
+        + ratingToken  -- payer must receive a newly minted rating token
 
     totalValueSpent :: Value
     totalValueSpent = valueSpent info
@@ -103,7 +107,8 @@ mkValidator rd (MkPayment Pay {..}) ctx =
     correctMintedToken = txInfoMint info == ratingToken
 
     ratingToken :: Value
-    ratingToken = Value.singleton (rdRatingTokenSymbol rd) (rdRatingTokenName rd) 1
+    ratingToken =
+        Value.singleton (rdRatingTokenSymbol rd) (rdRatingTokenName rd) 1
 
     correctDatumHash :: Bool
     correctDatumHash = txOutDatumHash ownOutput == txOutDatumHash ownInput
@@ -152,7 +157,6 @@ data StartParams = StartParams
 
 data PayParams = PayParams
     { ppRatingTokenSymbol :: !CurrencySymbol
---    , ppReputationOwner :: !PaymentPubKeyHash
     , ppRatingTokenName :: !TokenName
     , ppTokenAmount :: !Integer
     , ppPayment :: !Integer
