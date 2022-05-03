@@ -74,8 +74,8 @@ mkValidator :: RatingDatum -> RatingAction -> ScriptContext -> Bool
 mkValidator rd (MkPayment Pay {..}) ctx =
     traceIfFalse "Output ADA value is incorrect" correctLockedAda &&
     traceIfFalse "Owner does not receive correct amount of ADA" correctAdaToOwner &&
-    traceIfFalse "Payer does not receive RatingToken" correctRatingTokenToPayer &&
-    traceIfFalse "Output does not have correct Token value" correctMintedToken &&
+    traceIfFalse "Payer does not receive RatingToken" ratingTokenToPayer &&
+    traceIfFalse "RatingToken not minted" correctMintedToken &&
     traceIfFalse "Output datum hash is incorrect" correctDatumHash
   where
     correctLockedAda :: Bool
@@ -85,15 +85,15 @@ mkValidator rd (MkPayment Pay {..}) ctx =
     correctAdaToOwner :: Bool
     correctAdaToOwner = lovelaces (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) == pPay
 
-    correctRatingTokenToPayer :: Bool
-    correctRatingTokenToPayer =
-        assetClassValueOf (valuePaidTo info $ unPaymentPubKeyHash pPayer) ratingTokenAssetClass == 1
+    ratingTokenToPayer :: Bool
+    ratingTokenToPayer =
+        noAdaValue (valuePaidTo info $ unPaymentPubKeyHash pPayer) == ratingToken
 
     correctMintedToken :: Bool
-    correctMintedToken = txInfoMint info == assetClassValue ratingTokenAssetClass 1
+    correctMintedToken = txInfoMint info == ratingToken
 
-    ratingTokenAssetClass :: AssetClass
-    ratingTokenAssetClass = assetClass (rdRatingTokenSymbol rd) (rdRatingTokenName rd)
+    ratingToken :: Value
+    ratingToken = Value.singleton (rdRatingTokenSymbol rd) (rdRatingTokenName rd) 1
 
     correctDatumHash :: Bool
     correctDatumHash = txOutDatumHash ownOutput == txOutDatumHash ownInput
