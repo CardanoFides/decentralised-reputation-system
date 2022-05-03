@@ -90,18 +90,11 @@ mkValidator rd (MkPayment Pay {..}) ctx =
     correctValueToPayer :: Bool
     correctValueToPayer =
         (valuePaidTo info $ unPaymentPubKeyHash pPayer) ==
-        valuePayerToReceive
-
-    valuePayerToReceive :: Value
-    valuePayerToReceive =
-        totalValueSpent
+        valueSpent info  -- total value spent by this tx.
         - txOutValue ownInput  -- value locked by this script
         - (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) -- value to be paid to owner
         - txInfoFee info  -- tx fee
         + ratingToken  -- payer must receive a newly minted rating token
-
-    totalValueSpent :: Value
-    totalValueSpent = valueSpent info
 
     correctMintedToken :: Bool
     correctMintedToken = txInfoMint info == ratingToken
