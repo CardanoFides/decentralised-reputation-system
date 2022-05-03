@@ -74,7 +74,7 @@ mkValidator :: RatingDatum -> RatingAction -> ScriptContext -> Bool
 mkValidator rd (MkPayment Pay {..}) ctx =
     traceIfFalse "Output ADA value is incorrect" correctLockedAda &&
     traceIfFalse "Owner does not receive correct amount of ADA" correctAdaToOwner &&
-    traceIfFalse "Payer does not receive RatingToken" ratingTokenToPayer &&
+    traceIfFalse "Payer does not receive correct value" correctValueToPayer &&
     traceIfFalse "RatingToken not minted" correctMintedToken &&
     traceIfFalse "Output datum hash is incorrect" correctDatumHash
   where
@@ -85,9 +85,19 @@ mkValidator rd (MkPayment Pay {..}) ctx =
     correctAdaToOwner :: Bool
     correctAdaToOwner = lovelaces (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) == pPay
 
-    ratingTokenToPayer :: Bool
-    ratingTokenToPayer =
-        noAdaValue (valuePaidTo info $ unPaymentPubKeyHash pPayer) == ratingToken
+    correctValueToPayer :: Bool
+    correctValueToPayer = (valuePaidTo info $ unPaymentPubKeyHash pPayer) == valuePayerToReceive
+
+    valuePayerToReceive :: Value
+    valuePayerToReceive =
+        totalValueSpent
+        - txOutValue ownInput  -- value locked by this script
+        - (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) -- value to be paid to owner
+        - txInfoFee info  -- tx fee
+        + ratingToken
+
+    totalValueSpent :: Value
+    totalValueSpent = valueSpent info
 
     correctMintedToken :: Bool
     correctMintedToken = txInfoMint info == ratingToken
