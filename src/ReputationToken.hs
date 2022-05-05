@@ -64,37 +64,49 @@ data Pay = Pay
 
 PlutusTx.unstableMakeIsData ''Pay
 
-data RatingAction = MkPayment Pay
+data Rating = Rating
+    { rScore :: !Integer
+    }
+
+PlutusTx.unstableMakeIsData ''Rating
+
+data RatingAction = MkPayment Pay | PrvdRating Rating
 
 PlutusTx.unstableMakeIsData ''RatingAction
 
 {-# INLINABLE mkValidator #-}
 -- Check if a native token is minted and send to the script address
 mkValidator :: RatingDatum -> RatingAction -> ScriptContext -> Bool
-mkValidator rd (MkPayment Pay {..}) ctx =
-    traceIfFalse "Output ADA value is incorrect" correctLockedAda &&
-    traceIfFalse "Owner does not receive correct amount of ADA" correctAdaToOwner &&
-    traceIfFalse "Payer does not receive correct value" correctValueToPayer &&
-    traceIfFalse "RatingToken not minted" correctMintedToken &&
-    traceIfFalse "Output datum hash is incorrect" correctDatumHash
+mkValidator rd ra ctx = case ra of
+    (MkPayment Pay {..}) ->
+        traceIfFalse "Output ADA value is incorrect" correctLockedAda &&
+        traceIfFalse "Owner does not receive correct amount of ADA" correctAdaToOwner &&
+        traceIfFalse "Payer does not receive correct value" correctValueToPayer &&
+        traceIfFalse "RatingToken not minted" correctMintedToken &&
+        traceIfFalse "Output datum hash is incorrect" correctDatumHash
+      where
+        correctAdaToOwner :: Bool
+        correctAdaToOwner =
+            (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) ==
+            Ada.lovelaceValueOf pPay
+
+        correctValueToPayer :: Bool
+        correctValueToPayer =
+            (valuePaidTo info $ unPaymentPubKeyHash pPayer) ==
+            valueSpent info  -- total value spent by this tx.
+            - txOutValue ownInput  -- value locked by this script
+            - (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) -- value to be paid to owner
+            - txInfoFee info  -- tx fee
+            + ratingToken  -- payer must receive a newly minted rating token
+
+    (PrvdRating Rating {..}) -> True
   where
     correctLockedAda :: Bool
     correctLockedAda =
         txOutValue ownOutput == txOutValue ownInput
 
-    correctAdaToOwner :: Bool
-    correctAdaToOwner =
-        (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) ==
-        Ada.lovelaceValueOf pPay
-
-    correctValueToPayer :: Bool
-    correctValueToPayer =
-        (valuePaidTo info $ unPaymentPubKeyHash pPayer) ==
-        valueSpent info  -- total value spent by this tx.
-        - txOutValue ownInput  -- value locked by this script
-        - (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) -- value to be paid to owner
-        - txInfoFee info  -- tx fee
-        + ratingToken  -- payer must receive a newly minted rating token
+    info :: TxInfo
+    info = scriptContextTxInfo ctx
 
     correctMintedToken :: Bool
     correctMintedToken = txInfoMint info == ratingToken
@@ -115,9 +127,6 @@ mkValidator rd (MkPayment Pay {..}) ctx =
     ownOutput = case getContinuingOutputs ctx of
         [o] -> o
         _   -> traceError "Expect exactly one validator script output"
-
-    info :: TxInfo
-    info = scriptContextTxInfo ctx
 
 data RatingScript
 instance Scripts.ValidatorTypes RatingScript where
