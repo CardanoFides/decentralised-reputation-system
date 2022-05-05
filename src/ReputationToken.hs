@@ -119,13 +119,13 @@ mkValidator rd (MkPayment Pay {..}) ctx =
     info :: TxInfo
     info = scriptContextTxInfo ctx
 
-data Rating
-instance Scripts.ValidatorTypes Rating where
-    type instance DatumType Rating = RatingDatum
-    type instance RedeemerType Rating = RatingAction
+data RatingScript
+instance Scripts.ValidatorTypes RatingScript where
+    type instance DatumType RatingScript = RatingDatum
+    type instance RedeemerType RatingScript = RatingAction
 
-typedValidator :: Scripts.TypedValidator Rating
-typedValidator = Scripts.mkTypedValidator @Rating
+typedValidator :: Scripts.TypedValidator RatingScript
+typedValidator = Scripts.mkTypedValidator @RatingScript
     $$(PlutusTx.compile [|| mkValidator ||])
     $$(PlutusTx.compile [|| wrap ||])
   where
@@ -210,7 +210,7 @@ pay pp = do
              Constraints.mustSpendScriptOutput rORef r <>
              Constraints.mustSpendPubKeyOutput wORef
     Contract.logInfo @String $ printf "Ready to submit Tx"
-    ledgerTx <- submitTxConstraintsWith @Rating lookups tx
+    ledgerTx <- submitTxConstraintsWith @RatingScript lookups tx
     Contract.logInfo @String $ printf "Tx has been submited"
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
     Contract.logInfo @String $ printf "Paid to reputation validator script"
