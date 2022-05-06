@@ -165,9 +165,14 @@ data PayParams = PayParams
     , ppAddress :: !Address
     } deriving (Generic, ToJSON, FromJSON)
 
+data RateParams = RateParams
+    { rpScore :: !Integer
+    } deriving (Generic, ToJSON, FromJSON)
+
 type ReputationSchema =
         Endpoint "start" StartParams
     .\/ Endpoint "pay" PayParams
+    .\/ Endpoint "rate" RateParams
 
 start :: StartParams -> Contract w ReputationSchema Text ()
 start sp = do
@@ -187,11 +192,11 @@ start sp = do
 pay :: PayParams -> Contract w ReputationSchema Text ()
 pay pp = do
     (rORef, ro, rDat) <- findReputationOutput
-    Contract.logInfo @String $ printf "found reputation utxo"
+    Contract.logInfo @String $ printf "found reputation utxo for making payment"
     (wORef, wo) <- findWalletOutput $ ppAddress pp
-    Contract.logInfo @String $ printf "found wallet utxo"
+    Contract.logInfo @String $ printf "found wallet utxo for making payment"
     pkh <- Contract.ownPaymentPubKeyHash
-    Contract.logInfo @String $ printf "PubKeyHash is found"
+    Contract.logInfo @String $ printf "Own PubKeyHash is found"
     let mintVal = Value.singleton curSymbol (ppRatingTokenName pp) (ppTokenAmount pp)
         scriptInputVal = _ciTxOutValue ro
         walletReceivingVal = mintVal <> Ada.lovelaceValueOf minLovelace
@@ -218,11 +223,29 @@ pay pp = do
              Constraints.mustPayToPubKey pkh walletReceivingVal <>
              Constraints.mustSpendScriptOutput rORef r <>
              Constraints.mustSpendPubKeyOutput wORef
-    Contract.logInfo @String $ printf "Ready to submit Tx"
+    Contract.logInfo @String $ printf "Ready to submit Tx for making payment"
     ledgerTx <- submitTxConstraintsWith @RatingScript lookups tx
-    Contract.logInfo @String $ printf "Tx has been submited"
+    Contract.logInfo @String $ printf "Tx for making payment has been submited"
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
     Contract.logInfo @String $ printf "Paid to reputation validator script"
+
+rate :: RateParams -> Contract w ReputationSchema Text ()
+rate rp = do
+    (rORef, ro, rDat) <- findReputationOutput
+    Contract.logInfo @String $ printf "found reputation utxo for providing rating"
+    let r = Rating
+            { rScore = rpScore rp
+            }
+        red = Redeemer $ PlutusTx.toBuiltinData $ PrvdRating r
+        lookups = Constraints.unspentOutputs (Map.singleton rORef ro) <>
+                  Constraints.otherScript validator <>
+                  Constraints.typedValidatorLookups typedValidator
+        tx = Constraints.mustSpendScriptOutput rORef red
+    Contract.logInfo @String $ printf "Ready to submit Tx for providing rating"
+    ledgerTx <- submitTxConstraintsWith @RatingScript lookups tx
+    Contract.logInfo @String $ printf "Tx for providing rating has been submitted"
+    void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
+    Contract.logInfo @String $ printf "Provided rating to reputation validator script"
 
 findReputationOutput :: Contract w s Text (TxOutRef, ChainIndexTxOut, RatingDatum)
 findReputationOutput = do
@@ -250,10 +273,11 @@ findWalletOutput walletAddress = do
         (oref, o) : _ -> return (oref, o)
 
 endpoints :: Contract () ReputationSchema Text ()
-endpoints = awaitPromise (start' `select` pay') >> endpoints
+endpoints = awaitPromise (start' `select` pay' `select` rate') >> endpoints
   where
     start' = endpoint @"start" start
     pay' = endpoint @"pay" pay
+    rate' = endpoint @"rate" rate
 
 test :: IO ()
 test = runEmulatorTraceIO $ do
@@ -273,5 +297,10 @@ test = runEmulatorTraceIO $ do
         , ppTokenAmount = 1
         , ppPayment = 50_000_000
         , ppAddress = mockWalletAddress w2
+        }
+    void $ Emulator.waitNSlots 1
+
+    callEndpoint @"rate" h2 $ RateParams
+        {rpScore = 1
         }
     void $ Emulator.waitNSlots 1
