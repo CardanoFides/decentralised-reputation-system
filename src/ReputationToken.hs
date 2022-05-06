@@ -79,7 +79,7 @@ PlutusTx.unstableMakeIsData ''RatingAction
 mkValidator :: RatingDatum -> RatingAction -> ScriptContext -> Bool
 mkValidator rd ra ctx = case ra of
     (MkPayment Pay {..}) ->
-        traceIfFalse "Output ADA value is incorrect" correctLockedAda &&
+        traceIfFalse "Output value is incorrect" correctLockedValue &&
         traceIfFalse "Owner does not receive correct amount of ADA" correctAdaToOwner &&
         traceIfFalse "Payer does not receive correct value" correctValueToPayer &&
         traceIfFalse "RatingToken not minted" correctMintedToken &&
@@ -101,8 +101,8 @@ mkValidator rd ra ctx = case ra of
 
     (PrvdRating Rating {..}) -> True
   where
-    correctLockedAda :: Bool
-    correctLockedAda =
+    correctLockedValue :: Bool
+    correctLockedValue =
         txOutValue ownOutput == txOutValue ownInput
 
     info :: TxInfo
