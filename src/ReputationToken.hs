@@ -53,7 +53,17 @@ data RatingDatum = RatingDatum
     { rdRatingTokenSymbol :: !CurrencySymbol
     , rdRatingTokenName :: !TokenName
     , rdOwner :: !PaymentPubKeyHash
+    , rdScoreSum :: !Integer
+    , rdRatingCount :: !Integer
     }
+
+instance Eq RatingDatum where
+    {-# INLIABLE (==) #-}
+    a == b = (rdRatingTokenSymbol a == rdRatingTokenSymbol b) &&
+             (rdRatingTokenName a == rdRatingTokenName b) &&
+             (rdOwner a == rdOwner b) &&
+             (rdScoreSum a == rdScoreSum b) &&
+             (rdRatingCount a == rdRatingCount b)
 
 PlutusTx.unstableMakeIsData ''RatingDatum
 
@@ -83,6 +93,7 @@ mkValidator rd ra ctx = case ra of
         traceIfFalse "Owner does not receive correct amount of ADA" correctAdaToOwner &&
         traceIfFalse "Payer does not receive correct value" correctValueToPayer &&
         traceIfFalse "RatingToken not minted" correctMintedToken &&
+        traceIfFalse "Output datum is incorrect" correctDatum &&
         traceIfFalse "Output datum hash is incorrect" correctDatumHash
       where
         correctAdaToOwner :: Bool
@@ -99,7 +110,16 @@ mkValidator rd ra ctx = case ra of
             - txInfoFee info  -- tx fee
             + ratingToken  -- payer must receive a newly minted rating token
 
-    (PrvdRating Rating {..}) -> True
+    (PrvdRating Rating {..}) ->
+        traceIfFalse "Output datum is incorrect" correctOutputDatum
+      where
+        correctOutputDatum :: Bool
+        correctOutputDatum =
+            (rdRatingTokenSymbol rd == rdRatingTokenSymbol outputDatum) &&
+            (rdRatingTokenName rd == rdRatingTokenName outputDatum) &&
+            (rdOwner rd == rdOwner outputDatum) &&
+            (rdScoreSum rd + rScore  == rdScoreSum outputDatum) &&
+            (rdRatingCount rd + 1 == rdRatingCount outputDatum)
   where
     correctLockedValue :: Bool
     correctLockedValue =
@@ -115,6 +135,9 @@ mkValidator rd ra ctx = case ra of
     ratingToken =
         Value.singleton (rdRatingTokenSymbol rd) (rdRatingTokenName rd) 1
 
+    correctDatum :: Bool
+    correctDatum = rd == outputDatum
+
     correctDatumHash :: Bool
     correctDatumHash = txOutDatumHash ownOutput == txOutDatumHash ownInput
 
@@ -123,10 +146,17 @@ mkValidator rd ra ctx = case ra of
         Nothing -> traceError "Rating input missing"
         Just i -> txInInfoResolved i
 
-    ownOutput :: TxOut
-    ownOutput = case getContinuingOutputs ctx of
-        [o] -> o
-        _   -> traceError "Expect exactly one validator script output"
+    ownOutput   :: TxOut
+    outputDatum :: RatingDatum
+    (ownOutput, outputDatum) = case getContinuingOutputs ctx of
+        [o] -> case txOutDatumHash o of
+            Nothing   -> traceError "wrong output type"
+            Just h -> case findDatum h info of
+                Nothing        -> traceError "datum not found"
+                Just (Datum d) ->  case PlutusTx.fromBuiltinData d of
+                    Just ad' -> (o, ad')
+                    Nothing  -> traceError "error decoding data"
+        _   -> traceError "Expected exactly one validator script output"
 
 data RatingScript
 instance Scripts.ValidatorTypes RatingScript where
@@ -182,6 +212,8 @@ start sp = do
             { rdRatingTokenSymbol = spRatingTokenSymbol sp
             , rdRatingTokenName = spRatingTokenName sp
             , rdOwner = pkh
+            , rdScoreSum = 0
+            , rdRatingCount = 0
             }
         v = Ada.lovelaceValueOf 20_000_000
         tx = Constraints.mustPayToTheScript d v
@@ -206,11 +238,6 @@ pay pp = do
             { pPayer = pkh
             , pPay = lovelaces walletPayVal
             }
-        d = RatingDatum
-            { rdRatingTokenSymbol = ppRatingTokenSymbol pp
-            , rdRatingTokenName = ppRatingTokenName pp
-            , rdOwner = rOwnerPkh
-            }
         r = Redeemer $ PlutusTx.toBuiltinData $ MkPayment p
         lookups = Constraints.mintingPolicy policy <>
                   Constraints.unspentOutputs (Map.singleton rORef ro) <>
@@ -218,7 +245,7 @@ pay pp = do
                   Constraints.otherScript validator <>
                   Constraints.typedValidatorLookups typedValidator
         tx = Constraints.mustMintValue mintVal <>
-             Constraints.mustPayToTheScript d scriptInputVal <>
+             Constraints.mustPayToTheScript rDat scriptInputVal <>
              Constraints.mustPayToPubKey rOwnerPkh walletPayVal <>
              Constraints.mustPayToPubKey pkh walletReceivingVal <>
              Constraints.mustSpendScriptOutput rORef r <>
@@ -233,14 +260,23 @@ rate :: RateParams -> Contract w ReputationSchema Text ()
 rate rp = do
     (rORef, ro, rDat) <- findReputationOutput
     Contract.logInfo @String $ printf "found reputation utxo for providing rating"
-    let r = Rating
+    let scriptInputVal = _ciTxOutValue ro
+        outputDatum = RatingDatum
+            { rdRatingTokenSymbol = rdRatingTokenSymbol rDat
+            , rdRatingTokenName = rdRatingTokenName rDat
+            , rdOwner = rdOwner rDat
+            , rdScoreSum = rdScoreSum rDat + rpScore rp
+            , rdRatingCount = rdRatingCount rDat + 1
+            }
+        r = Rating
             { rScore = rpScore rp
             }
         red = Redeemer $ PlutusTx.toBuiltinData $ PrvdRating r
         lookups = Constraints.unspentOutputs (Map.singleton rORef ro) <>
                   Constraints.otherScript validator <>
                   Constraints.typedValidatorLookups typedValidator
-        tx = Constraints.mustSpendScriptOutput rORef red
+        tx = Constraints.mustPayToTheScript outputDatum scriptInputVal <>
+             Constraints.mustSpendScriptOutput rORef red
     Contract.logInfo @String $ printf "Ready to submit Tx for providing rating"
     ledgerTx <- submitTxConstraintsWith @RatingScript lookups tx
     Contract.logInfo @String $ printf "Tx for providing rating has been submitted"
