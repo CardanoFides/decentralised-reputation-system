@@ -111,8 +111,13 @@ mkValidator rd ra ctx = case ra of
             + ratingToken  -- payer must receive a newly minted rating token
 
     (PrvdRating Rating {..}) ->
+        traceIfFalse "Rating Token is not locked" correctLockedRatingToken &&
         traceIfFalse "Output datum is incorrect" correctOutputDatum
       where
+        correctLockedRatingToken :: Bool
+        correctLockedRatingToken =
+            txOutValue ownOutput == txOutValue ownInput <> ratingToken
+
         correctOutputDatum :: Bool
         correctOutputDatum =
             (rdRatingTokenSymbol rd == rdRatingTokenSymbol outputDatum) &&
@@ -261,6 +266,8 @@ rate rp = do
     (rORef, ro, rDat) <- findReputationOutput
     Contract.logInfo @String $ printf "found reputation utxo for providing rating"
     let scriptInputVal = _ciTxOutValue ro
+        ratingToken = Value.singleton (rdRatingTokenSymbol rDat) (rdRatingTokenName rDat) 1
+        scriptOutputVal = scriptInputVal <> ratingToken
         outputDatum = RatingDatum
             { rdRatingTokenSymbol = rdRatingTokenSymbol rDat
             , rdRatingTokenName = rdRatingTokenName rDat
@@ -275,7 +282,7 @@ rate rp = do
         lookups = Constraints.unspentOutputs (Map.singleton rORef ro) <>
                   Constraints.otherScript validator <>
                   Constraints.typedValidatorLookups typedValidator
-        tx = Constraints.mustPayToTheScript outputDatum scriptInputVal <>
+        tx = Constraints.mustPayToTheScript outputDatum scriptOutputVal <>
              Constraints.mustSpendScriptOutput rORef red
     Contract.logInfo @String $ printf "Ready to submit Tx for providing rating"
     ledgerTx <- submitTxConstraintsWith @RatingScript lookups tx
