@@ -85,7 +85,6 @@ data RatingAction = MkPayment Pay | PrvdRating Rating
 PlutusTx.unstableMakeIsData ''RatingAction
 
 {-# INLINABLE mkValidator #-}
--- Check if a native token is minted and send to the script address
 mkValidator :: RatingDatum -> RatingAction -> ScriptContext -> Bool
 mkValidator rd ra ctx = case ra of
     (MkPayment Pay {..}) ->
@@ -193,11 +192,7 @@ data StartParams = StartParams
     } deriving (Generic, ToJSON, FromJSON)
 
 data PayParams = PayParams
-    { ppRatingTokenSymbol :: !CurrencySymbol
-    , ppRatingTokenName :: !TokenName
-    , ppTokenAmount :: !Integer
-    , ppPayment :: !Integer
-    , ppAddress :: !Address
+    { ppPayment :: !Integer
     } deriving (Generic, ToJSON, FromJSON)
 
 data RateParams = RateParams
@@ -230,11 +225,9 @@ pay :: PayParams -> Contract w ReputationSchema Text ()
 pay pp = do
     (rORef, ro, rDat) <- findReputationOutput
     Contract.logInfo @String $ printf "found reputation utxo for making payment"
-    (wORef, wo) <- findWalletOutput $ ppAddress pp
-    Contract.logInfo @String $ printf "found wallet utxo for making payment"
     pkh <- Contract.ownPaymentPubKeyHash
     Contract.logInfo @String $ printf "Own PubKeyHash is found"
-    let mintVal = Value.singleton curSymbol (ppRatingTokenName pp) (ppTokenAmount pp)
+    let mintVal = Value.singleton (rdRatingTokenSymbol rDat) (rdRatingTokenName rDat) 1
         scriptInputVal = _ciTxOutValue ro
         walletReceivingVal = mintVal <> Ada.lovelaceValueOf minLovelace
         walletPayVal = lovelaceValueOf $ ppPayment pp
@@ -246,15 +239,13 @@ pay pp = do
         r = Redeemer $ PlutusTx.toBuiltinData $ MkPayment p
         lookups = Constraints.mintingPolicy policy <>
                   Constraints.unspentOutputs (Map.singleton rORef ro) <>
-                  Constraints.unspentOutputs (Map.singleton wORef wo) <>
                   Constraints.otherScript validator <>
                   Constraints.typedValidatorLookups typedValidator
         tx = Constraints.mustMintValue mintVal <>
              Constraints.mustPayToTheScript rDat scriptInputVal <>
              Constraints.mustPayToPubKey rOwnerPkh walletPayVal <>
              Constraints.mustPayToPubKey pkh walletReceivingVal <>
-             Constraints.mustSpendScriptOutput rORef r <>
-             Constraints.mustSpendPubKeyOutput wORef
+             Constraints.mustSpendScriptOutput rORef r
     Contract.logInfo @String $ printf "Ready to submit Tx for making payment"
     ledgerTx <- submitTxConstraintsWith @RatingScript lookups tx
     Contract.logInfo @String $ printf "Tx for making payment has been submited"
@@ -335,11 +326,7 @@ test = runEmulatorTraceIO $ do
     void $ Emulator.waitNSlots 1
 
     callEndpoint @"pay" h2 $ PayParams
-        { ppRatingTokenSymbol = curSymbol
-        , ppRatingTokenName = "TRUST"
-        , ppTokenAmount = 1
-        , ppPayment = 50_000_000
-        , ppAddress = mockWalletAddress w2
+        { ppPayment = 50_000_000
         }
     void $ Emulator.waitNSlots 1
 
