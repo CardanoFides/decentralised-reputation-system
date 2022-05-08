@@ -187,9 +187,6 @@ valHash = Scripts.validatorHash typedValidator
 scrAddress :: Ledger.Address
 scrAddress = scriptAddress validator
 
-minLovelace :: Integer
-minLovelace = 2_000_000
-
 data StartParams = StartParams
     { spRatingTokenSymbol :: !CurrencySymbol
     , spRatingTokenName :: !TokenName
@@ -233,7 +230,7 @@ pay pp = do
     Contract.logInfo @String $ printf "Own PubKeyHash is found"
     let mintVal = Value.singleton (rdRatingTokenSymbol rDat) (rdRatingTokenName rDat) 1
         scriptInputVal = _ciTxOutValue ro
-        walletReceivingVal = mintVal <> Ada.lovelaceValueOf minLovelace
+        walletReceivingVal = mintVal <> Ada.toValue minAdaTxOut
         walletPayVal = lovelaceValueOf $ ppPayment pp
         rOwnerPkh = rdOwner rDat
         p = Pay
