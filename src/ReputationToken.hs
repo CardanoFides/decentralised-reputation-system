@@ -22,6 +22,7 @@ import           GHC.Generics               (Generic)
 import           Plutus.Contract            as Contract
 import           Plutus.Trace.Emulator      as Emulator
 import qualified Plutus.V1.Ledger.Scripts   as Scripts
+import qualified Plutus.V1.Ledger.Credential as Credential
 import qualified PlutusTx
 import           PlutusTx.Prelude           hiding (Semigroup(..), unless)
 import           Ledger                     hiding (mint, singleton)
@@ -32,18 +33,6 @@ import           Ledger.Value               as Value
 import           Prelude                    (IO, Semigroup (..), String)
 import           Text.Printf                (printf)
 import           Wallet.Emulator.Wallet
-
-{-# INLINABLE mkPolicy #-}
-mkPolicy :: () -> ScriptContext -> Bool
-mkPolicy () _ = True
-
-{-# INLINABLE policy #-}
-policy :: Scripts.MintingPolicy
-policy = mkMintingPolicyScript $$(PlutusTx.compile [|| Scripts.wrapMintingPolicy mkPolicy ||])
-
-{-# INLINABLE curSymbol #-}
-curSymbol :: CurrencySymbol
-curSymbol = scriptCurrencySymbol policy
 
 {-# INLINABLE lovelaces #-}
 lovelaces :: Value -> Integer
@@ -171,6 +160,7 @@ instance Scripts.ValidatorTypes RatingScript where
     type instance DatumType RatingScript = RatingDatum
     type instance RedeemerType RatingScript = RatingAction
 
+{-# INLINABLE typedValidator #-}
 typedValidator :: Scripts.TypedValidator RatingScript
 typedValidator = Scripts.mkTypedValidator @RatingScript
     $$(PlutusTx.compile [|| mkValidator ||])
@@ -178,14 +168,43 @@ typedValidator = Scripts.mkTypedValidator @RatingScript
   where
     wrap = Scripts.wrapValidator @RatingDatum @RatingAction
 
+{-# INLINABLE validator #-}
 validator :: Validator
 validator = Scripts.validatorScript typedValidator
 
+{-# INLINABLE valHash #-}
 valHash :: Ledger.ValidatorHash
 valHash = Scripts.validatorHash typedValidator
 
 scrAddress :: Ledger.Address
 scrAddress = scriptAddress validator
+
+{-# INLINABLE mkPolicy #-}
+mkPolicy :: () -> ScriptContext -> Bool
+mkPolicy () ctx =
+    traceIfFalse "No reputation validator script present" reputationContractPresent
+  where
+    reputationContractPresent :: Bool
+    reputationContractPresent =
+        let xs = [ i
+                | i <- txInfoInputs info
+                , (addressCredential . txOutAddress . txInInfoResolved) i == Credential.ScriptCredential valHash
+                ]
+        in case xs of
+            [_] -> True
+            _ -> False
+
+    info :: TxInfo
+    info = scriptContextTxInfo ctx
+
+{-# INLINABLE policy #-}
+policy :: Scripts.MintingPolicy
+policy = mkMintingPolicyScript $$(PlutusTx.compile [|| Scripts.wrapMintingPolicy mkPolicy ||])
+
+{-# INLINABLE curSymbol #-}
+curSymbol :: CurrencySymbol
+curSymbol = scriptCurrencySymbol policy
+
 
 data StartParams = StartParams
     { spRatingTokenSymbol :: !CurrencySymbol
