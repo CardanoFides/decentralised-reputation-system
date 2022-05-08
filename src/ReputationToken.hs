@@ -110,9 +110,13 @@ mkValidator rd ra ctx = case ra of
             + ratingToken  -- payer must receive a newly minted rating token
 
     (PrvdRating Rating {..}) ->
+        traceIfFalse "Malformed rating" correctRating &&
         traceIfFalse "Rating Token is not locked" correctLockedRatingToken &&
         traceIfFalse "Output datum is incorrect" correctOutputDatum
       where
+        correctRating :: Bool
+        correctRating = rScore >= 1 && rScore <= 5
+
         correctLockedRatingToken :: Bool
         correctLockedRatingToken =
             txOutValue ownOutput == txOutValue ownInput <> ratingToken
@@ -331,6 +335,6 @@ test = runEmulatorTraceIO $ do
     void $ Emulator.waitNSlots 1
 
     callEndpoint @"rate" h2 $ RateParams
-        {rpScore = 1
+        {rpScore = 5
         }
     void $ Emulator.waitNSlots 1
