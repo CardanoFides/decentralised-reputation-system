@@ -180,15 +180,15 @@ scrAddress :: Ledger.Address
 scrAddress = scriptAddress validator
 
 {-# INLINABLE mkPolicy #-}
-mkPolicy :: () -> ScriptContext -> Bool
-mkPolicy () ctx =
+mkPolicy :: Ledger.ValidatorHash -> () -> ScriptContext -> Bool
+mkPolicy h () ctx =
     traceIfFalse "No reputation validator script present" reputationContractPresent
   where
     reputationContractPresent :: Bool
     reputationContractPresent =
         let xs = [ i
                 | i <- txInfoInputs info
-                , (addressCredential . txOutAddress . txInInfoResolved) i == Credential.ScriptCredential valHash
+                , (addressCredential . txOutAddress . txInInfoResolved) i == Credential.ScriptCredential h
                 ]
         in case xs of
             [_] -> True
@@ -198,12 +198,15 @@ mkPolicy () ctx =
     info = scriptContextTxInfo ctx
 
 {-# INLINABLE policy #-}
-policy :: Scripts.MintingPolicy
-policy = mkMintingPolicyScript $$(PlutusTx.compile [|| Scripts.wrapMintingPolicy mkPolicy ||])
+policy :: Ledger.ValidatorHash -> Scripts.MintingPolicy
+policy h = mkMintingPolicyScript $
+    $$(PlutusTx.compile [|| Scripts.wrapMintingPolicy . mkPolicy ||])
+    `PlutusTx.applyCode`
+    PlutusTx.liftCode h
 
 {-# INLINABLE curSymbol #-}
-curSymbol :: CurrencySymbol
-curSymbol = scriptCurrencySymbol policy
+curSymbol :: Ledger.ValidatorHash -> CurrencySymbol
+curSymbol = scriptCurrencySymbol . policy
 
 
 data StartParams = StartParams
@@ -257,7 +260,7 @@ pay pp = do
             , pPay = lovelaces walletPayVal
             }
         r = Redeemer $ PlutusTx.toBuiltinData $ MkPayment p
-        lookups = Constraints.mintingPolicy policy <>
+        lookups = Constraints.mintingPolicy (policy valHash) <>
                   Constraints.unspentOutputs (Map.singleton rORef ro) <>
                   Constraints.otherScript validator <>
                   Constraints.typedValidatorLookups typedValidator
@@ -340,7 +343,7 @@ test = runEmulatorTraceIO $ do
     h1 <- activateContractWallet w1 endpoints
     h2 <- activateContractWallet w2 endpoints
     callEndpoint @"start" h1 $ StartParams
-        { spRatingTokenSymbol = curSymbol
+        { spRatingTokenSymbol = curSymbol valHash
         , spRatingTokenName = "TRUST"
         }
     void $ Emulator.waitNSlots 1
