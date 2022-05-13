@@ -159,25 +159,3 @@ endpoints = awaitPromise (start' `select` pay' `select` rate') >> endpoints
     start' = endpoint @"start" start
     pay' = endpoint @"pay" pay
     rate' = endpoint @"rate" rate
-
-test :: IO ()
-test = runEmulatorTraceIO $ do
-    let w1 = knownWallet 1
-    let w2 = knownWallet 2
-    h1 <- activateContractWallet w1 endpoints
-    h2 <- activateContractWallet w2 endpoints
-    callEndpoint @"start" h1 $ StartParams
-        { spRatingTokenSymbol = curSymbol valHash
-        , spRatingTokenName = "TRUST"
-        }
-    void $ Emulator.waitNSlots 1
-
-    callEndpoint @"pay" h2 $ PayParams
-        { ppPayment = 50_000_000
-        }
-    void $ Emulator.waitNSlots 1
-
-    callEndpoint @"rate" h2 $ RateParams
-        {rpScore = 5
-        }
-    void $ Emulator.waitNSlots 1
