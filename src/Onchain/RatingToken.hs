@@ -24,14 +24,14 @@ import qualified Ledger.Typed.Scripts       as Scripts
 {-# INLINABLE mkPolicy #-}
 mkPolicy :: Ledger.ValidatorHash -> () -> ScriptContext -> Bool
 mkPolicy h () ctx =
-    traceIfFalse "No reputation validator script present" reputationContractPresent
+    traceIfFalse "No validator script present" validatorPresent
   where
-    reputationContractPresent :: Bool
-    reputationContractPresent =
-        let xs = [ i
-                | i <- txInfoInputs info
-                , (addressCredential . txOutAddress . txInInfoResolved) i == Credential.ScriptCredential h
-                ]
+    validatorPresent :: Bool
+    validatorPresent =
+        let xs = [ i | i <- txInfoInputs info
+                 , (addressCredential . txOutAddress . txInInfoResolved) i ==
+                   Credential.ScriptCredential h
+                 ]
         in case xs of
             [_] -> True
             _ -> False

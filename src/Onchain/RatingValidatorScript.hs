@@ -68,8 +68,7 @@ mkValidator rd ra ctx = case ra of
         traceIfFalse "Owner does not receive correct amount of ADA" correctAdaToOwner &&
         traceIfFalse "Payer does not receive correct value" correctValueToPayer &&
         traceIfFalse "RatingToken not minted" correctMintedToken &&
-        traceIfFalse "Output datum is incorrect" correctDatum &&
-        traceIfFalse "Output datum hash is incorrect" correctDatumHash
+        traceIfFalse "Output datum hash is different" sameDatumHash
       where
         correctAdaToOwner :: Bool
         correctAdaToOwner =
@@ -119,11 +118,8 @@ mkValidator rd ra ctx = case ra of
     ratingToken =
         Value.singleton (rdRatingTokenSymbol rd) (rdRatingTokenName rd) 1
 
-    correctDatum :: Bool
-    correctDatum = rd == outputDatum
-
-    correctDatumHash :: Bool
-    correctDatumHash = txOutDatumHash ownOutput == txOutDatumHash ownInput
+    sameDatumHash :: Bool
+    sameDatumHash = txOutDatumHash ownOutput == txOutDatumHash ownInput
 
     ownInput :: TxOut
     ownInput = case findOwnInput ctx of
