@@ -70,7 +70,7 @@ mkValidator rd ra ctx = case ra of
         traceIfFalse "Owner does not receive correct amount of ADA" correctAdaToOwner &&
         traceIfFalse "Payer does not receive correct value" correctValueToPayer &&
         traceIfFalse "RatingToken not minted" correctMintedToken &&
-        traceIfFalse "Output datum hash is different" sameDatumHash
+        traceIfFalse "Output datum is incorrect" correctOutputDatum
       where
         correctAdaToOwner :: Bool
         correctAdaToOwner =
@@ -85,6 +85,15 @@ mkValidator rd ra ctx = case ra of
             - (valuePaidTo info $ unPaymentPubKeyHash $ rdOwner rd) -- value to be paid to owner
             - txInfoFee info  -- tx fee
             + ratingToken  -- payer must receive a newly minted rating token
+
+        correctOutputDatum :: Bool
+        correctOutputDatum =
+            (rdRatingTokenSymbol rd == rdRatingTokenSymbol outputDatum) &&
+            (rdRatingTokenName rd == rdRatingTokenName outputDatum) &&
+            (rdOwner rd == rdOwner outputDatum) &&
+            (rdScoreSum rd == rdScoreSum outputDatum) &&
+            (rdRatingCount rd == rdRatingCount outputDatum) &&
+            (rdTotalRatingTokens rd + 1 == rdTotalRatingTokens outputDatum)
 
     (PrvdRating Rating {..}) ->
         traceIfFalse "Malformed rating" correctRating &&
@@ -104,7 +113,8 @@ mkValidator rd ra ctx = case ra of
             (rdRatingTokenName rd == rdRatingTokenName outputDatum) &&
             (rdOwner rd == rdOwner outputDatum) &&
             (rdScoreSum rd + rScore  == rdScoreSum outputDatum) &&
-            (rdRatingCount rd + 1 == rdRatingCount outputDatum)
+            (rdRatingCount rd + 1 == rdRatingCount outputDatum) &&
+            (rdTotalRatingTokens rd == rdTotalRatingTokens outputDatum)
   where
     correctLockedValue :: Bool
     correctLockedValue =
@@ -119,9 +129,6 @@ mkValidator rd ra ctx = case ra of
     ratingToken :: Value
     ratingToken =
         Value.singleton (rdRatingTokenSymbol rd) (rdRatingTokenName rd) 1
-
-    sameDatumHash :: Bool
-    sameDatumHash = txOutDatumHash ownOutput == txOutDatumHash ownInput
 
     ownInput :: TxOut
     ownInput = case findOwnInput ctx of

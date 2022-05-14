@@ -78,17 +78,28 @@ pay pp = do
         walletReceivingVal = mintVal <> Ada.toValue minAdaTxOut
         walletPayVal = lovelaceValueOf $ ppPayment pp
         rOwnerPkh = rdOwner rDat
+        p :: Pay
         p = Pay
             { pPayer = pkh
             , pPay = lovelaces walletPayVal
             }
+        r :: Redeemer
         r = Redeemer $ PlutusTx.toBuiltinData $ MkPayment p
+        d :: RatingDatum
+        d = RatingDatum
+            { rdRatingTokenSymbol = rdRatingTokenSymbol rDat
+            , rdRatingTokenName = rdRatingTokenName rDat
+            , rdOwner = rdOwner rDat
+            , rdScoreSum = rdScoreSum rDat
+            , rdRatingCount = rdRatingCount rDat
+            , rdTotalRatingTokens = rdTotalRatingTokens rDat + 1
+            }
         lookups = Constraints.mintingPolicy (policy valHash) <>
                   Constraints.unspentOutputs (Map.singleton rORef ro) <>
                   Constraints.otherScript validator <>
                   Constraints.typedValidatorLookups typedValidator
         tx = Constraints.mustMintValue mintVal <>
-             Constraints.mustPayToTheScript rDat scriptInputVal <>
+             Constraints.mustPayToTheScript d scriptInputVal <>
              Constraints.mustPayToPubKey rOwnerPkh walletPayVal <>
              Constraints.mustPayToPubKey pkh walletReceivingVal <>
              Constraints.mustSpendScriptOutput rORef r
