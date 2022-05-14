@@ -29,14 +29,23 @@ mkPolicy h () ctx =
     traceIfFalse "Wrong amount to mint" checkMintedAmount
   where
     validatorPresent :: Bool
-    validatorPresent =
+    validatorPresent = case validatorDatum of
+        Just _ -> True
+        _ -> False
+
+    validatorDatum :: Maybe Datum
+    validatorDatum =
         let xs = [ i | i <- txInfoInputs info
                  , (addressCredential . txOutAddress . txInInfoResolved) i ==
                    Credential.ScriptCredential h
                  ]
         in case xs of
-            [_] -> True
-            _ -> False
+            [ i ] ->
+                let maybeDh = (txOutDatumHash . txInInfoResolved) i
+                in case maybeDh of
+                    Just dh -> findDatum dh info
+                    _ -> Nothing
+            _ -> Nothing
 
     checkMintedAmount :: Bool
     checkMintedAmount = case flattenValue (txInfoMint info) of
