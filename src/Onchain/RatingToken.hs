@@ -16,6 +16,7 @@ module Onchain.RatingToken where
 
 import qualified Plutus.V1.Ledger.Scripts   as Scripts
 import qualified Plutus.V1.Ledger.Credential as Credential
+import           Plutus.V1.Ledger.Value     (flattenValue)
 import qualified PlutusTx
 import           PlutusTx.Prelude           hiding (Semigroup(..), unless)
 import           Ledger                     hiding (mint, singleton)
@@ -24,7 +25,8 @@ import qualified Ledger.Typed.Scripts       as Scripts
 {-# INLINABLE mkPolicy #-}
 mkPolicy :: Ledger.ValidatorHash -> () -> ScriptContext -> Bool
 mkPolicy h () ctx =
-    traceIfFalse "No validator script present" validatorPresent
+    traceIfFalse "No validator script present" validatorPresent &&
+    traceIfFalse "Wrong amount to mint" checkMintedAmount
   where
     validatorPresent :: Bool
     validatorPresent =
@@ -35,6 +37,11 @@ mkPolicy h () ctx =
         in case xs of
             [_] -> True
             _ -> False
+
+    checkMintedAmount :: Bool
+    checkMintedAmount = case flattenValue (txInfoMint info) of
+        [(_, _, amt)] -> amt == 1
+        _               -> False
 
     info :: TxInfo
     info = scriptContextTxInfo ctx
