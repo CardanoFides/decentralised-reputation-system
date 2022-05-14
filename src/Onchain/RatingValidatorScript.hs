@@ -31,6 +31,7 @@ data RatingDatum = RatingDatum
     , rdOwner :: !PaymentPubKeyHash
     , rdScoreSum :: !Integer
     , rdRatingCount :: !Integer
+    , rdTotalRatingTokens :: !Integer
     }
 
 instance Eq RatingDatum where
@@ -39,7 +40,8 @@ instance Eq RatingDatum where
              (rdRatingTokenName a == rdRatingTokenName b) &&
              (rdOwner a == rdOwner b) &&
              (rdScoreSum a == rdScoreSum b) &&
-             (rdRatingCount a == rdRatingCount b)
+             (rdRatingCount a == rdRatingCount b) &&
+             (rdTotalRatingTokens a == rdTotalRatingTokens b)
 
 PlutusTx.unstableMakeIsData ''RatingDatum
 

@@ -20,16 +20,14 @@ import           Data.Map                   as Map
 import           Data.Text                  (Text)
 import           GHC.Generics               (Generic)
 import           Plutus.Contract            as Contract
-import           Plutus.Trace.Emulator      as Emulator
 import qualified PlutusTx
 import           PlutusTx.Prelude           hiding (Semigroup(..), unless)
 import           Ledger                     hiding (mint, singleton)
 import           Ledger.Ada                 as Ada
 import           Ledger.Constraints         as Constraints
 import           Ledger.Value               as Value
-import           Prelude                    (IO, Semigroup (..), String)
+import           Prelude                    (Semigroup (..), String)
 import           Text.Printf                (printf)
-import           Wallet.Emulator.Wallet
 import           Onchain.RatingToken
 import           Onchain.RatingValidatorScript
 
@@ -61,6 +59,7 @@ start sp = do
             , rdOwner = pkh
             , rdScoreSum = 0
             , rdRatingCount = 0
+            , rdTotalRatingTokens = 0
             }
         v = Ada.lovelaceValueOf 20_000_000
         tx = Constraints.mustPayToTheScript d v
@@ -112,6 +111,7 @@ rate rp = do
             , rdOwner = rdOwner rDat
             , rdScoreSum = rdScoreSum rDat + rpScore rp
             , rdRatingCount = rdRatingCount rDat + 1
+            , rdTotalRatingTokens = rdTotalRatingTokens rDat
             }
         r = Rating
             { rScore = rpScore rp
