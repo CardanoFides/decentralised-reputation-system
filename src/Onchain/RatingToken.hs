@@ -21,12 +21,12 @@ import qualified PlutusTx
 import           PlutusTx.Prelude           hiding (Semigroup(..), unless)
 import           Ledger                     hiding (mint, singleton)
 import qualified Ledger.Typed.Scripts       as Scripts
-
+import           Onchain.RatingValidatorScript (RatingDatum(..))
 {-# INLINABLE mkPolicy #-}
 mkPolicy :: Ledger.ValidatorHash -> () -> ScriptContext -> Bool
 mkPolicy h () ctx =
     traceIfFalse "No validator script present" validatorPresent &&
-    traceIfFalse "Wrong amount to mint" checkMintedAmount
+    traceIfFalse "Wrong token to mint" checkTokenToMint
   where
     validatorPresent :: Bool
     validatorPresent = case validatorDatum of
@@ -47,10 +47,16 @@ mkPolicy h () ctx =
                     _ -> Nothing
             _ -> Nothing
 
-    checkMintedAmount :: Bool
-    checkMintedAmount = case flattenValue (txInfoMint info) of
-        [(_, _, amt)] -> amt == 1
-        _               -> False
+    checkTokenToMint :: Bool
+    checkTokenToMint = case flattenValue (txInfoMint info) of
+        [(_, tn, amt)] ->
+            case validatorDatum of
+                Nothing -> traceError "No datum is found"
+                Just (Datum d) ->
+                    case PlutusTx.fromBuiltinData d of
+                        Nothing -> traceError "Error decoding data"
+                        Just rd -> tn == rdRatingTokenName rd && amt == 1
+        _               -> traceError "Error in token to be minted"
 
     info :: TxInfo
     info = scriptContextTxInfo ctx
